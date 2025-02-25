@@ -23,7 +23,7 @@ def create_h5(filepath, data_dict, chunks=64):
     def create_dataset(h5file, path, values, chunksize):
         if values.dtype.kind == 'U':
             values = values.astype('S')
-        h5file.create_dataset(path, data=values, chunks=chunksize, compression='gzip')
+        h5file.create_dataset(path, data=values, chunks=chunksize)
 
     with h5py.File(filepath, "w") as h5file:
         for key, values in data_dict.items():
