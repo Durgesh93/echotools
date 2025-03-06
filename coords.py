@@ -25,7 +25,7 @@ class Coords2D:
         p1, p2 = coords[:, 0, :], coords[:, 1, :]
         direction = p2 - p1
         perp_dir = np.stack([-direction[:, 1], direction[:, 0]], axis=-1)
-        norm_perp_dir = perp_dir / np.linalg.norm(perp_dir, axis=1, keepdims=True)
+        norm_perp_dir = perp_dir / (np.linalg.norm(perp_dir, axis=1, keepdims=True)+np.finfo(np.float16).eps)
         shift = norm_perp_dir * self.S[:, np.newaxis]
         shifted_coords = coords + shift[:, np.newaxis, :]
         return shifted_coords if self.batchmode else shifted_coords[0]
@@ -65,42 +65,73 @@ class Coords2D:
         return coords
 
 
-def sargmax(norm_heatmaps,anchor_idx=None):
-    norm_heatmaps     = torch.from_numpy(norm_heatmaps)
-    yy, xx            = torch.meshgrid([torch.arange(norm_heatmaps.shape[-2]), torch.arange(norm_heatmaps.shape[-1])],indexing='ij')
-    yy, xx            = yy.float(), xx.float()
-    yy                = yy.to(norm_heatmaps.device)
-    xx                = xx.to(norm_heatmaps.device)
+def sargmax(norm_heatmaps, anchor_idx=None,batchmode=True):
 
+    if not batchmode:
+        norm_heatmaps = np.array([norm_heatmaps])
+        if anchor_idx is not None:
+            anchor_idx = np.array([anchor_idx])
+    
+
+    norm_heatmaps = torch.as_tensor(norm_heatmaps)
+    batch_size, num_maps, height, width = norm_heatmaps.shape
+
+    yy, xx = torch.meshgrid(
+        torch.arange(height, dtype=torch.float32, device=norm_heatmaps.device),
+        torch.arange(width, dtype=torch.float32, device=norm_heatmaps.device),
+        indexing='ij'
+    )
+   
     if anchor_idx is not None:
-        anchor_idx    = torch.from_numpy(anchor_idx)
-        heatmaps_y    = torch.sum(norm_heatmaps * yy, dim=-2)/torch.sum(norm_heatmaps,dim=-2)
-        anchor_idx    = anchor_idx.view(heatmaps_y.shape[0],1,1).repeat(1,heatmaps_y.shape[1],1)
-        yy_loc        = torch.gather(input=heatmaps_y,dim=-1,index=anchor_idx)
-        scoords       = torch.cat([yy_loc,anchor_idx],dim=-1)
+        anchor_idx = torch.as_tensor(anchor_idx, device=norm_heatmaps.device)
+        heatmaps_y = torch.sum(norm_heatmaps * yy, dim=-2) / torch.sum(norm_heatmaps, dim=-2)
+        anchor_idx = anchor_idx.view(batch_size,1,1).repeat(1,num_maps,1)
+        yy_loc     = torch.gather(input=heatmaps_y, dim=-1, index=anchor_idx)
+        scoords    = torch.cat([yy_loc, anchor_idx.float()], dim=-1)  # Ensure float dtype
     else:
-        yy_loc        = torch.sum(norm_heatmaps * yy, dim=[-2, -1]).view(norm_heatmaps.shape[0], norm_heatmaps.shape[1], 1)
-        xx_loc        = torch.sum(norm_heatmaps * xx, dim=[-2, -1]).view(norm_heatmaps.shape[0], norm_heatmaps.shape[1], 1)
-        scoords       = torch.cat([yy_loc, xx_loc], 2)
-        
-    return scoords.numpy()
+        yy_loc     = torch.sum(norm_heatmaps * yy, dim=[-2, -1]).view(batch_size, num_maps, 1)
+        xx_loc     = torch.sum(norm_heatmaps * xx, dim=[-2, -1]).view(batch_size, num_maps, 1)
+        scoords    = torch.cat([yy_loc, xx_loc], dim=-1)
+    if not batchmode:
+        scoords = scoords[0]
+        anchor_idx = anchor_idx[0]
+    return scoords.cpu().numpy()
 
-def spreads(norm_heatmaps,coords,anchor_idx=None):
+    
+
+
+def spreads(norm_heatmaps,coords,anchor_idx=None,batchmode=True):
+
+    if not batchmode:
+        norm_heatmaps = np.array([norm_heatmaps])
+        coords        = np.array([coords])
+        if anchor_idx is not None:
+            anchor_idx = np.array([anchor_idx])
+
     norm_heatmaps     = torch.from_numpy(norm_heatmaps)
     coords            = torch.from_numpy(coords)
 
-    yy, xx            = torch.meshgrid([torch.arange(norm_heatmaps.shape[-2]), torch.arange(norm_heatmaps.shape[-1])],indexing='ij')
-    yy, xx            = yy.float(), xx.float()
-    yy                = yy.to(norm_heatmaps.device)
-    xx                = xx.to(norm_heatmaps.device)
-    all_grid_coords   = torch.stack([yy, xx],dim=0).view((1,1,2)+norm_heatmaps.shape[-2:]).repeat(norm_heatmaps.shape[:2]+(1,1,1))    
-    coords            = coords.view(coords.shape+(1,1))
+    batch_size, num_maps, height, width = norm_heatmaps.shape
+
+    yy, xx = torch.meshgrid(
+        torch.arange(height, dtype=torch.float32, device=norm_heatmaps.device),
+        torch.arange(width, dtype=torch.float32, device=norm_heatmaps.device),
+        indexing='ij'
+    )
+
+    all_grid_coords   = torch.stack([yy, xx],dim=0).view(1,1,2,height,width).repeat(batch_size,num_maps,1,1,1)    
+    coords            = coords.view(batch_size,num_maps,2,1,1)
     radius            = torch.linalg.norm(all_grid_coords - coords,dim=2)
+    
     if anchor_idx is not None:
         anchor_idx    = torch.from_numpy(anchor_idx)
         spreads_y     = (torch.sum(norm_heatmaps * radius, dim=-2)/torch.sum(norm_heatmaps,dim=-2))
-        anchor_idx    = anchor_idx.view(spreads_y.shape[0],1,1).repeat(1,spreads_y.shape[1],1)
-        spreads       = torch.gather(input=spreads_y,dim=-1,index=anchor_idx).squeeze()
+        anchor_idx    = anchor_idx.view(batch_size,1,1).repeat(1,num_maps,1)
+        spreads       = torch.gather(input=spreads_y,dim=-1,index=anchor_idx)[:,:,0]
     else:
         spreads       = torch.sum(norm_heatmaps*radius,dim=[-2,-1])
+    
+    if not batchmode:
+        spreads = spreads[0]
+
     return spreads.numpy()

@@ -129,9 +129,9 @@ class VBScanLine(Coords2D):
             a1, a2 = segment[0], segment[1]
             if np.all(segment == 0):
                 raise ValueError(f'Invalid line coordinates set data')
-            if a2[1] - a1[1] == 0:
+            if np.abs(a2[1] - a1[1]) <= np.finfo(np.float16).eps:
                 coeffs.append([90, a2[1]])
-            elif a2[0] - a1[0] == 0:
+            elif np.abs(a2[0] - a1[0]) <= np.finfo(np.float16).eps:
                 coeffs.append([0, a2[0]])
             else:
                 slope,intercept = np.polyfit(segment[:, 1], segment[:, 0],1).tolist()
@@ -145,13 +145,13 @@ class VBScanLine(Coords2D):
         for coeff,dim in zip(coeffs,self.image_dim):
             angle,c  = coeff[0],coeff[1]
             viewport = {'x_min':0,'y_min':0,'y_max':dim[0]-1,'x_max':dim[1]-1}
-            if np.abs(angle) == 90:
+            if (np.abs(angle) >= 90-np.finfo(np.float16).eps) and (np.abs(angle) <= 90+np.finfo(np.float16).eps):
                 y_coords = np.array([viewport['y_min'],viewport['y_max']])
                 m        = 0
                 segment  = np.stack([y_coords,np.polyval([m,c],y_coords)],axis=-1)
             else:
                 m        = np.tan(np.deg2rad(angle))
-                x_coords = np.array(np.random.randint(viewport['x_min']+1,viewport['x_max'],size=(2,)))
+                x_coords = np.random.choice(np.arange(viewport['x_min'], viewport['x_max']+1), size=2, replace=False)
                 segment  = np.stack([np.polyval([m,c],x_coords),x_coords],axis=-1)
             coords.append(segment)
         coords = np.array(coords)

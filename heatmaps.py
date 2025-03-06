@@ -105,7 +105,7 @@ def get_heatmaps(coords,mask, shape, heatmap_ratio, heatmap_sigma,paired=False,b
     for idx in range(len(coords)):
         norm_heatmaps.append(get_heatmaps_single(coords[idx],mask[idx],height[idx], width[idx],heatmap_ratio[idx], heatmap_sigma[idx],paired))
     norm_heatmaps = np.stack(norm_heatmaps)
-    return norm_heatmaps
+    return norm_heatmaps if batchmode else norm_heatmaps[0]
 
 
 
