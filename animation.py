@@ -5,6 +5,8 @@ from rich.progress import Progress
 import time,io
 from PIL import Image
 import imageio
+from plotly.subplots import make_subplots
+
 
 class MoviePlayer:
     def __init__(self, video_array, n_plots=1,interval=30):
